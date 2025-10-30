@@ -64,6 +64,7 @@ Aplikasi web modern untuk monitoring broadcast WhatsApp dan sistem ticketing log
 
 ### Database
 - **PostgreSQL** - Primary Database
+- **Supabase** - Cloud PostgreSQL with Real-time Features
 - **SQLite3** - Temporary/Fallback Database
 - **Mock Database** - Development & Testing
 
@@ -203,15 +204,99 @@ Aplikasi akan berjalan di:
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
+| `DATABASE_TYPE` | Database type (postgresql, supabase, sqlite, mock) | postgresql | No |
 | `DATABASE_URL` | PostgreSQL connection string | - | No |
 | `USE_SQLITE` | Use SQLite instead of PostgreSQL | false | No |
+| `SUPABASE_URL` | Supabase project URL | - | No* |
+| `SUPABASE_ANON_KEY` | Supabase anonymous key | - | No* |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | - | No* |
+| `VITE_SUPABASE_URL` | Supabase URL for frontend | - | No* |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon key for frontend | - | No* |
 | `JWT_SECRET` | Secret key for JWT tokens | - | Yes |
 | `JWT_EXPIRES_IN` | JWT token expiration time | 24h | No |
 | `PORT` | Server port | 3001 | No |
 | `NODE_ENV` | Environment mode | development | No |
 | `CORS_ORIGIN` | CORS allowed origin | http://localhost:5173 | No |
 
+*Required when using Supabase as database type
+
 ### Database Configuration
+
+#### Supabase Setup (Recommended)
+
+1. **Create Supabase Project**
+   - Go to [supabase.com](https://supabase.com)
+   - Create a new project
+   - Wait for the project to be ready
+
+2. **Get Project Credentials**
+   ```bash
+   # From your Supabase dashboard, copy:
+   # - Project URL
+   # - Anon (public) key
+   # - Service role (secret) key
+   ```
+
+3. **Configure Environment Variables**
+   ```env
+   # Set database type to Supabase
+   DATABASE_TYPE=supabase
+   
+   # Backend Supabase Configuration
+   SUPABASE_URL=https://your-project-ref.supabase.co
+   SUPABASE_ANON_KEY=your-supabase-anon-key-here
+   SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key-here
+   
+   # Frontend Supabase Configuration
+   VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+   VITE_SUPABASE_ANON_KEY=your-supabase-anon-key-here
+   ```
+
+4. **Create Database Tables**
+   ```sql
+   -- Users table
+   CREATE TABLE users (
+     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+     email VARCHAR(255) UNIQUE NOT NULL,
+     name VARCHAR(255) NOT NULL,
+     role VARCHAR(50) DEFAULT 'agent',
+     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+   );
+   
+   -- Tickets table
+   CREATE TABLE tickets (
+     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+     title VARCHAR(255) NOT NULL,
+     description TEXT NOT NULL,
+     status VARCHAR(50) DEFAULT 'open',
+     priority VARCHAR(50) DEFAULT 'medium',
+     assignee_id UUID REFERENCES users(id),
+     created_by UUID REFERENCES users(id) NOT NULL,
+     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+   );
+   
+   -- Broadcast logs table
+   CREATE TABLE broadcast_logs (
+     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+     message TEXT NOT NULL,
+     status VARCHAR(50) DEFAULT 'pending',
+     recipient_count INTEGER DEFAULT 0,
+     sent_at TIMESTAMP WITH TIME ZONE,
+     created_by UUID REFERENCES users(id) NOT NULL,
+     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+   );
+   ```
+
+5. **Enable Real-time (Optional)**
+   ```sql
+   -- Enable real-time for tables
+   ALTER PUBLICATION supabase_realtime ADD TABLE users;
+   ALTER PUBLICATION supabase_realtime ADD TABLE tickets;
+   ALTER PUBLICATION supabase_realtime ADD TABLE broadcast_logs;
+   ```
 
 #### PostgreSQL Setup
 ```bash
@@ -728,6 +813,95 @@ pnpm run check           # TypeScript type checking
    - Update schema di `database/schema.sql`
    - Tambah migration script jika perlu
 
+## 📚 Supabase Usage Examples
+
+### Backend Usage
+
+```typescript
+// Import Supabase database
+import { supabaseDb } from './config/supabaseDatabase.js'
+
+// Get all users
+const users = await supabaseDb.getUsers()
+
+// Create new ticket
+const newTicket = await supabaseDb.createTicket({
+  title: 'New Issue',
+  description: 'Issue description',
+  created_by: 'user-id',
+  status: 'open',
+  priority: 'medium'
+})
+
+// Subscribe to real-time updates
+const channel = supabaseDb.subscribeToTickets((payload) => {
+  console.log('Ticket updated:', payload)
+})
+```
+
+### Frontend Usage
+
+```typescript
+// Import Supabase client
+import { supabase, auth, database, realtime } from './lib/supabase'
+
+// Authentication
+const { data, error } = await auth.signIn('user@example.com', 'password')
+
+// Database operations
+const { data: tickets } = await database.getTickets()
+const { data: newTicket } = await database.createTicket({
+  title: 'New Ticket',
+  description: 'Description',
+  created_by: 'user-id'
+})
+
+// Real-time subscriptions
+const ticketChannel = realtime.subscribeToTickets((payload) => {
+  console.log('Real-time update:', payload)
+})
+
+// Cleanup
+realtime.unsubscribe(ticketChannel)
+```
+
+### Environment Configuration
+
+```env
+# Backend Configuration
+DATABASE_TYPE=supabase
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# Frontend Configuration
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+### Database Migration from PostgreSQL to Supabase
+
+1. **Export existing data** (if migrating from PostgreSQL):
+   ```bash
+   pg_dump ticketing_db > backup.sql
+   ```
+
+2. **Import to Supabase**:
+   - Use Supabase SQL Editor
+   - Or use migration tools
+
+3. **Update environment variables**:
+   ```bash
+   # Change from postgresql to supabase
+   DATABASE_TYPE=supabase
+   ```
+
+4. **Test connection**:
+   ```bash
+   pnpm run dev
+   # Check console for "Connected to Supabase database successfully"
+   ```
+
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -780,6 +954,55 @@ Error: listen EADDRINUSE :::3001
 # Kill process menggunakan port
 npx kill-port 3001
 # Atau ubah PORT di .env
+```
+
+#### 6. Supabase Connection Error
+```
+Error: Failed to connect to Supabase
+```
+**Solution**:
+```bash
+# Check environment variables
+echo $SUPABASE_URL
+echo $SUPABASE_ANON_KEY
+
+# Verify credentials in Supabase dashboard
+# Make sure project is not paused
+```
+
+#### 7. Supabase Authentication Error
+```
+Error: Invalid API key
+```
+**Solution**:
+```bash
+# Regenerate API keys in Supabase dashboard
+# Update .env with new keys
+# Restart application
+```
+
+#### 8. Supabase Real-time Not Working
+```
+Warning: Real-time subscription failed
+```
+**Solution**:
+```sql
+-- Enable real-time in Supabase SQL Editor
+ALTER PUBLICATION supabase_realtime ADD TABLE your_table_name;
+```
+
+#### 9. Supabase RLS (Row Level Security) Issues
+```
+Error: Permission denied for table
+```
+**Solution**:
+```sql
+-- Disable RLS for development (not recommended for production)
+ALTER TABLE your_table_name DISABLE ROW LEVEL SECURITY;
+
+-- Or create proper RLS policies
+CREATE POLICY "Enable read access for all users" ON your_table_name
+FOR SELECT USING (true);
 ```
 
 ### Debug Mode
