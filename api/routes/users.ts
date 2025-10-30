@@ -43,7 +43,7 @@ router.get('/', authenticateToken, requireRole(['admin']), async (req: AuthReque
 
     queryParams.push(limit, offset);
 
-    const result = await pool.query(query, queryParams);
+    const result = await db.query(query, queryParams);
 
     // Get total count
     const countQuery = `
@@ -52,7 +52,7 @@ router.get('/', authenticateToken, requireRole(['admin']), async (req: AuthReque
       ${whereClause}
     `;
     
-    const countResult = await pool.query(countQuery, queryParams.slice(0, -2));
+    const countResult = await db.query(countQuery, queryParams.slice(0, -2));
     const total = parseInt(countResult.rows[0].total);
 
     res.json({
@@ -76,8 +76,8 @@ router.get('/:id', authenticateToken, requireRole(['admin']), async (req: AuthRe
   try {
     const userId = req.params.id;
 
-    const result = await pool.query(
-      'SELECT id, full_name, email, role, is_active, created_at, updated_at FROM users WHERE id = $1',
+    const result = await db.query(
+      'SELECT id, full_name, email, role, is_active, created_at FROM users WHERE id = $1',
       [userId]
     );
 
@@ -101,22 +101,22 @@ router.post('/', authenticateToken, requireRole(['admin']), validateRequest(crea
     const { full_name, email, password, role } = req.body;
 
     // Check if email already exists
-    const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    const existingUser = await db.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) {
       return res.status(400).json({ error: 'Email already exists' });
     }
 
     // Hash password
-    const saltRounds = 10;
-    const password_hash = await bcrypt.hash(password, saltRounds);
+    const password_hash = await bcrypt.hash(password, 10);
 
+    // Insert new user
     const query = `
       INSERT INTO users (full_name, email, password_hash, role)
       VALUES ($1, $2, $3, $4)
-      RETURNING id, full_name, email, role, is_active, created_at, updated_at
+      RETURNING id, full_name, email, role, is_active, created_at
     `;
-
-    const result = await pool.query(query, [full_name, email, password_hash, role]);
+    
+    const result = await db.query(query, [full_name, email, password_hash, role]);
 
     res.status(201).json({
       message: 'User created successfully',
@@ -136,14 +136,14 @@ router.put('/:id', authenticateToken, requireRole(['admin']), validateRequest(up
     const updates = req.body;
 
     // Check if user exists
-    const checkResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    const checkResult = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
     if (checkResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Check if email already exists (if email is being updated)
     if (updates.email) {
-      const existingUser = await pool.query('SELECT id FROM users WHERE email = $1 AND id != $2', [updates.email, userId]);
+      const existingUser = await db.query('SELECT id FROM users WHERE email = $1 AND id != $2', [updates.email, userId]);
       if (existingUser.rows.length > 0) {
         return res.status(400).json({ error: 'Email already exists' });
       }
@@ -166,7 +166,7 @@ router.put('/:id', authenticateToken, requireRole(['admin']), validateRequest(up
       RETURNING id, full_name, email, role, is_active, created_at, updated_at
     `;
 
-    const result = await pool.query(query, [userId, ...updateValues]);
+    const result = await db.query(query, [userId, ...updateValues]);
 
     res.json({
       message: 'User updated successfully',
@@ -189,7 +189,7 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req: Aut
       return res.status(400).json({ error: 'Cannot delete your own account' });
     }
 
-    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING *', [userId]);
+    const result = await db.query('DELETE FROM users WHERE id = $1 RETURNING *', [userId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
@@ -206,7 +206,7 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req: Aut
 // Get agents list (for ticket assignment)
 router.get('/agents/list', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const result = await pool.query(
+    const result = await db.query(
       'SELECT id, full_name, email FROM users WHERE role = $1 AND is_active = true ORDER BY full_name',
       ['agent']
     );

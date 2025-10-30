@@ -55,11 +55,11 @@ const Dashboard: React.FC = () => {
         apiClient.get('/dashboard/priority-distribution')
       ]);
 
-      setSummary(summaryRes.data);
-      setTicketTrends(ticketTrendsRes.data);
-      setBroadcastTrends(broadcastTrendsRes.data);
-      setAgentPerformance(agentPerfRes.data);
-      setPriorityDistribution(priorityDistRes.data);
+      setSummary(summaryRes as DashboardSummary);
+      setTicketTrends(ticketTrendsRes as TrendData[]);
+      setBroadcastTrends(broadcastTrendsRes as TrendData[]);
+      setAgentPerformance(agentPerfRes as AgentPerformance[]);
+      setPriorityDistribution(priorityDistRes as PriorityDistribution[]);
     } catch (error) {
       toast.error('Failed to load dashboard data');
       console.error('Dashboard error:', error);

@@ -38,13 +38,13 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+      { expiresIn: '1h' }
     );
 
     const refreshToken = jwt.sign(
       { userId: user.id },
       process.env.JWT_REFRESH_SECRET!,
-      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
+      { expiresIn: '7d' }
     );
 
     res.json({
@@ -94,7 +94,7 @@ router.post('/refresh', async (req, res) => {
     const accessToken = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
+      { expiresIn: '1h' }
     );
 
     res.json({

@@ -16,7 +16,7 @@ router.post('/broadcast-logs', authenticateApiKey, validateRequest(broadcastLogS
       RETURNING *
     `;
 
-    const result = await pool.query(query, [tracking_number, consignee_phone, status, message_content, error_message]);
+    const result = await db.query(query, [tracking_number, consignee_phone, status, message_content, error_message]);
     const broadcastLog = result.rows[0];
 
     // Update dashboard summary metrics
@@ -53,7 +53,7 @@ router.post('/tickets', authenticateApiKey, validateRequest(createTicketSchema),
       RETURNING *
     `;
 
-    const result = await pool.query(query, [tracking_number, customer_phone, subject, description, priority || 'medium']);
+    const result = await db.query(query, [tracking_number, customer_phone, subject, description, priority || 'medium']);
     const ticket = result.rows[0];
 
     // Update dashboard summary metrics
@@ -96,7 +96,7 @@ router.put('/tickets/:id/status', authenticateApiKey, async (req, res) => {
     }
 
     // Check if ticket exists
-    const checkResult = await pool.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
+    const checkResult = await db.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
     if (checkResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -116,12 +116,12 @@ router.put('/tickets/:id/status', authenticateApiKey, async (req, res) => {
     
     updateQuery += ' WHERE id = $2 RETURNING *';
 
-    const result = await pool.query(updateQuery, queryParams);
+    const result = await db.query(updateQuery, queryParams);
     const ticket = result.rows[0];
 
     // Add system comment if provided
     if (comment) {
-      await pool.query(
+      await db.query(
         'INSERT INTO ticket_comments (ticket_id, comment_text, is_internal_note) VALUES ($1, $2, $3)',
         [ticketId, `[n8n] ${comment}`, true]
       );
@@ -163,7 +163,7 @@ router.get('/tickets/tracking/:tracking_number', authenticateApiKey, async (req,
       WHERE tracking_number = $1
     `;
 
-    const result = await pool.query(query, [trackingNumber]);
+    const result = await db.query(query, [trackingNumber]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -198,7 +198,7 @@ router.get('/broadcast-logs/tracking/:tracking_number', authenticateApiKey, asyn
       ORDER BY broadcast_at DESC
     `;
 
-    const result = await pool.query(query, [trackingNumber]);
+    const result = await db.query(query, [trackingNumber]);
 
     res.json({
       success: true,
@@ -220,7 +220,7 @@ async function updateDashboardMetrics() {
     const today = new Date().toISOString().split('T')[0];
 
     // Update ticket metrics
-    const ticketMetrics = await pool.query(`
+    const ticketMetrics = await db.query(`
       SELECT 
         COUNT(*) as total_tickets,
         COUNT(CASE WHEN status = 'open' THEN 1 END) as open_tickets,
@@ -233,7 +233,7 @@ async function updateDashboardMetrics() {
     const ticketData = ticketMetrics.rows[0];
 
     // Update broadcast metrics
-    const broadcastMetrics = await pool.query(`
+    const broadcastMetrics = await db.query(`
       SELECT 
         COUNT(*) as total_broadcasts,
         COUNT(CASE WHEN status = 'success' THEN 1 END) as successful_broadcasts,
@@ -256,7 +256,7 @@ async function updateDashboardMetrics() {
     ];
 
     for (const metric of metrics) {
-      await pool.query(`
+      await db.query(`
         INSERT INTO dashboard_summary (metric_name, metric_value, metric_date)
         VALUES ($1, $2, $3)
         ON CONFLICT (metric_name, metric_date)

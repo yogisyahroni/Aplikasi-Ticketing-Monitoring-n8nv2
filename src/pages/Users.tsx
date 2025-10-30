@@ -47,10 +47,15 @@ const Users: React.FC = () => {
   });
 
   // Edit user form
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState<{
+    full_name: string;
+    email: string;
+    role: 'admin' | 'agent';
+    is_active: boolean;
+  }>({
     full_name: '',
     email: '',
-    role: 'agent' as const,
+    role: 'agent',
     is_active: true
   });
 
@@ -72,8 +77,8 @@ const Users: React.FC = () => {
       });
 
       const response = await apiClient.get<PaginatedResponse<User>>(`/users?${params}`);
-      setUsers(response.data.data);
-      setPagination(response.data.pagination);
+      setUsers(response.data);
+      setPagination(response.pagination);
     } catch (error) {
       toast.error('Failed to load users');
       console.error('Users error:', error);

@@ -37,7 +37,7 @@ export class WebSocketServer {
         const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
         
         // Verify user exists in database
-        const userResult = await pool.query(
+        const userResult = await db.query(
           'SELECT id, email, role, status FROM users WHERE id = $1 AND status = $2',
           [decoded.userId, 'active']
         );

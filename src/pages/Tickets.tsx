@@ -66,14 +66,14 @@ const Tickets: React.FC = () => {
         // Add new ticket to the list if it matches current filters
         const newTicket = lastUpdate.data as Ticket;
         setTickets(prev => [newTicket, ...prev]);
-        toast.success(`New ticket created: ${newTicket.uid}`);
+        toast.success(`New ticket created: ${newTicket.ticket_uid}`);
       } else if (lastUpdate.type === 'ticket_updated') {
         // Update existing ticket in the list
         const updatedTicket = lastUpdate.data as Ticket;
         setTickets(prev => prev.map(ticket => 
           ticket.id === updatedTicket.id ? updatedTicket : ticket
         ));
-        toast.info(`Ticket ${updatedTicket.uid} updated`);
+        toast.info(`Ticket ${updatedTicket.ticket_uid} updated`);
       }
     }
   }, [lastUpdate]);
@@ -91,8 +91,8 @@ const Tickets: React.FC = () => {
       });
 
       const response = await apiClient.get<PaginatedResponse<Ticket>>(`/tickets?${params}`);
-      setTickets(response.data.data);
-      setPagination(response.data.pagination);
+      setTickets(response.data);
+      setPagination(response.pagination);
     } catch (error) {
       toast.error('Failed to load tickets');
       console.error('Tickets error:', error);
@@ -104,7 +104,7 @@ const Tickets: React.FC = () => {
   const fetchAgents = async () => {
     try {
       const response = await apiClient.get<User[]>('/users/agents');
-      setAgents(response.data);
+      setAgents(response);
     } catch (error) {
       console.error('Failed to load agents:', error);
     }

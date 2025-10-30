@@ -1,22 +1,10 @@
 import express from 'express';
 import db from '../config/database.js';
 import { authenticateToken, AuthRequest } from '../middleware/auth.js';
-import { validateRequest } from '../middleware/validation.js';
+import { validateRequest, createBroadcastLogSchema } from '../middleware/validation.js';
 import { getWebSocketServer } from '../websocket/socketServer.js';
-import { z } from 'zod';
 
 const router = express.Router();
-
-// Validation schemas
-const createBroadcastLogSchema = z.object({
-  tracking_number: z.string().min(1),
-  consignee_name: z.string().min(1),
-  consignee_phone: z.string().min(1),
-  message: z.string().min(1),
-  status: z.enum(['pending', 'success', 'failed']).default('pending'),
-  response_message: z.string().optional(),
-  broadcast_at: z.string().optional()
-});
 
 // Get all broadcast logs with pagination and filtering
 router.get('/', authenticateToken, async (req: AuthRequest, res) => {
@@ -75,7 +63,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
 
     queryParams.push(limit, offset);
 
-    const result = await pool.query(query, queryParams);
+    const result = await db.query(query, queryParams);
 
     // Get total count
     const countQuery = `
@@ -84,7 +72,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
       ${whereClause}
     `;
     
-    const countResult = await pool.query(countQuery, queryParams.slice(0, -2));
+    const countResult = await db.query(countQuery, queryParams.slice(0, -2));
     const total = parseInt(countResult.rows[0].total);
 
     res.json({
@@ -108,7 +96,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const logId = req.params.id;
 
-    const result = await pool.query('SELECT * FROM broadcast_logs WHERE id = $1', [logId]);
+    const result = await db.query('SELECT * FROM broadcast_logs WHERE id = $1', [logId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Broadcast log not found' });
@@ -144,7 +132,7 @@ router.get('/stats/summary', authenticateToken, async (req: AuthRequest, res) =>
       WHERE broadcast_at >= $1 AND broadcast_at <= $2
     `;
 
-    const result = await pool.query(query, [date_from, date_to]);
+    const result = await db.query(query, [date_from, date_to]);
 
     // Get hourly statistics for the last 24 hours
     const hourlyQuery = `
@@ -159,7 +147,7 @@ router.get('/stats/summary', authenticateToken, async (req: AuthRequest, res) =>
       ORDER BY hour DESC
     `;
 
-    const hourlyResult = await pool.query(hourlyQuery);
+    const hourlyResult = await db.query(hourlyQuery);
 
     res.json({
       summary: result.rows[0],
@@ -194,7 +182,7 @@ router.post('/', validateRequest(createBroadcastLogSchema), async (req, res) => 
       RETURNING *
     `;
 
-    const result = await pool.query(query, [
+    const result = await db.query(query, [
       tracking_number, consignee_name, consignee_phone,
       message, status, response_message, broadcast_at
     ]);
@@ -235,7 +223,7 @@ router.put('/:id/status', async (req, res) => {
       RETURNING *
     `;
 
-    const result = await pool.query(query, [status, response_message, logId]);
+    const result = await db.query(query, [status, response_message, logId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Broadcast log not found' });

@@ -307,6 +307,267 @@ server {
 }
 ```
 
+## 🐳 Docker Deployment
+
+### Prerequisites
+
+- Docker Engine 20.10+
+- Docker Compose 2.0+
+- 4GB+ RAM untuk development
+- 8GB+ RAM untuk production
+
+### Quick Start dengan Docker
+
+#### 1. Development Mode
+
+```bash
+# Clone repository
+git clone https://github.com/yogisyahroni/Aplikasi-Ticketing-Monitoring-n8nv2.git
+cd Aplikasi-Ticketing-Monitoring-n8nv2
+
+# Jalankan dengan Docker Compose
+docker-compose up -d
+
+# Lihat logs
+docker-compose logs -f app
+```
+
+#### 2. Production Mode
+
+```bash
+# Jalankan dengan profile production (termasuk Nginx)
+docker-compose --profile production up -d
+
+# Atau hanya aplikasi utama
+docker-compose up -d app postgres redis
+```
+
+### Docker Commands
+
+#### Build Image
+
+```bash
+# Build image aplikasi
+docker build -t ticketing-monitoring:latest .
+
+# Build dengan target tertentu
+docker build --target production -t ticketing-monitoring:prod .
+```
+
+#### Run Container
+
+```bash
+# Jalankan container tunggal
+docker run -d \
+  --name ticketing-app \
+  -p 3001:3001 \
+  -p 5173:5173 \
+  -e NODE_ENV=production \
+  -e DATABASE_TYPE=sqlite \
+  -v $(pwd)/data:/app/data \
+  ticketing-monitoring:latest
+
+# Jalankan dengan PostgreSQL
+docker run -d \
+  --name ticketing-app \
+  -p 3001:3001 \
+  -e NODE_ENV=production \
+  -e DATABASE_TYPE=postgresql \
+  -e DATABASE_URL=postgresql://user:pass@postgres:5432/ticketing_db \
+  --link postgres-container:postgres \
+  ticketing-monitoring:latest
+```
+
+### Environment Variables untuk Docker
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `NODE_ENV` | Environment mode | production | No |
+| `PORT` | Server port | 3001 | No |
+| `VITE_PORT` | Frontend port | 5173 | No |
+| `DATABASE_TYPE` | Database type (sqlite/postgresql) | sqlite | No |
+| `SQLITE_DB_PATH` | SQLite database path | /app/data/database.sqlite | No |
+| `DATABASE_URL` | PostgreSQL connection string | - | No |
+| `JWT_SECRET` | JWT secret key | - | Yes |
+| `BCRYPT_ROUNDS` | Bcrypt hash rounds | 12 | No |
+| `CORS_ORIGIN` | CORS allowed origin | http://localhost:5173 | No |
+| `WEBSOCKET_PORT` | WebSocket port | 3001 | No |
+| `LOG_LEVEL` | Log level | info | No |
+
+### Docker Compose Services
+
+#### 1. App Service
+- **Container**: `ticketing-monitoring-app`
+- **Ports**: `3001:3001`, `5173:5173`
+- **Volumes**: Data persistence untuk database, logs, uploads
+- **Health Check**: HTTP check pada `/api/health`
+
+#### 2. PostgreSQL Service
+- **Container**: `ticketing-monitoring-postgres`
+- **Port**: `5432:5432`
+- **Database**: `ticketing_monitoring`
+- **Auto-initialization**: Schema dan seed data
+
+#### 3. Redis Service (Optional)
+- **Container**: `ticketing-monitoring-redis`
+- **Port**: `6379:6379`
+- **Purpose**: Session management dan caching
+
+#### 4. Nginx Service (Production)
+- **Container**: `ticketing-monitoring-nginx`
+- **Ports**: `80:80`, `443:443`
+- **Purpose**: Reverse proxy dan load balancing
+
+### Volume Management
+
+```bash
+# Lihat volumes
+docker volume ls
+
+# Backup data
+docker run --rm -v ticketing_monitoring_n8n_app_data:/data -v $(pwd):/backup alpine tar czf /backup/app-data-backup.tar.gz -C /data .
+
+# Restore data
+docker run --rm -v ticketing_monitoring_n8n_app_data:/data -v $(pwd):/backup alpine tar xzf /backup/app-data-backup.tar.gz -C /data
+```
+
+### Monitoring & Logs
+
+```bash
+# Lihat status containers
+docker-compose ps
+
+# Lihat logs semua services
+docker-compose logs -f
+
+# Lihat logs service tertentu
+docker-compose logs -f app
+docker-compose logs -f postgres
+
+# Monitor resource usage
+docker stats
+
+# Masuk ke container
+docker-compose exec app sh
+```
+
+### Troubleshooting Docker
+
+#### 1. Container tidak bisa start
+
+```bash
+# Check logs
+docker-compose logs app
+
+# Check container status
+docker-compose ps
+
+# Restart service
+docker-compose restart app
+```
+
+#### 2. Database connection error
+
+```bash
+# Check PostgreSQL logs
+docker-compose logs postgres
+
+# Test database connection
+docker-compose exec postgres psql -U ticketing_user -d ticketing_monitoring -c "SELECT 1;"
+
+# Reset database
+docker-compose down -v
+docker-compose up -d
+```
+
+#### 3. Port sudah digunakan
+
+```bash
+# Check port usage
+netstat -tulpn | grep :3001
+
+# Stop conflicting services
+sudo systemctl stop apache2
+sudo systemctl stop nginx
+
+# Atau ubah port di docker-compose.yml
+```
+
+#### 4. Permission issues
+
+```bash
+# Fix permissions
+sudo chown -R $USER:$USER ./data ./logs ./uploads
+
+# Atau jalankan dengan user yang tepat
+docker-compose exec --user root app chown -R nextjs:nodejs /app/data
+```
+
+### Production Deployment dengan Docker
+
+#### 1. Setup Production Environment
+
+```bash
+# Buat direktori production
+mkdir -p /opt/ticketing-monitoring
+cd /opt/ticketing-monitoring
+
+# Clone repository
+git clone https://github.com/yogisyahroni/Aplikasi-Ticketing-Monitoring-n8nv2.git .
+
+# Setup environment
+cp .env.example .env.production
+```
+
+#### 2. Configure Production Variables
+
+```env
+# .env.production
+NODE_ENV=production
+DATABASE_TYPE=postgresql
+DATABASE_URL=postgresql://ticketing_user:secure_password@postgres:5432/ticketing_monitoring
+JWT_SECRET=your-super-secure-jwt-secret-key-here
+CORS_ORIGIN=https://yourdomain.com
+LOG_LEVEL=warn
+```
+
+#### 3. Deploy dengan SSL
+
+```bash
+# Setup SSL certificates
+mkdir -p nginx/ssl
+# Copy your SSL certificates to nginx/ssl/
+
+# Deploy dengan Nginx
+docker-compose --profile production up -d
+```
+
+#### 4. Backup Strategy
+
+```bash
+# Setup automated backup
+cat > backup.sh << 'EOF'
+#!/bin/bash
+DATE=$(date +%Y%m%d_%H%M%S)
+docker-compose exec -T postgres pg_dump -U ticketing_user ticketing_monitoring > backup_${DATE}.sql
+docker run --rm -v ticketing_monitoring_n8n_app_data:/data -v $(pwd):/backup alpine tar czf /backup/data_${DATE}.tar.gz -C /data .
+EOF
+
+chmod +x backup.sh
+
+# Setup cron job
+echo "0 2 * * * /opt/ticketing-monitoring/backup.sh" | crontab -
+```
+
+### Docker Security Best Practices
+
+1. **Non-root User**: Container berjalan sebagai user `nextjs` (UID 1001)
+2. **Read-only Filesystem**: Sebagian besar filesystem read-only
+3. **Health Checks**: Monitoring kesehatan container
+4. **Resource Limits**: CPU dan memory limits
+5. **Network Isolation**: Custom network untuk service communication
+6. **Secret Management**: Environment variables untuk sensitive data
+
 ## 📡 API Documentation
 
 ### Authentication Endpoints

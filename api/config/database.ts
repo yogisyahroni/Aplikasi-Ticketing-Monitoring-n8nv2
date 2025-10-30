@@ -52,7 +52,7 @@ export const db = {
       if (useMockDatabase) {
         return await MockDatabase.query(text, params);
       } else {
-        const result = await pool.query(text, params);
+        const result = await db.query(text, params);
         return result.rows;
       }
     } catch (error) {

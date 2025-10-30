@@ -71,22 +71,42 @@ app.use(
 )
 
 /**
+ * Serve static files from frontend build (production mode)
+ */
+if (process.env.NODE_ENV === 'production') {
+  const distPath = path.join(__dirname, '..', 'dist')
+  app.use(express.static(distPath))
+  
+  // Handle client-side routing - serve index.html for non-API routes
+  app.get('*', (req: Request, res: Response) => {
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(distPath, 'index.html'))
+    } else {
+      res.status(404).json({
+        success: false,
+        error: 'API not found',
+      })
+    }
+  })
+} else {
+  /**
+   * 404 handler for development mode
+   */
+  app.use((req: Request, res: Response) => {
+    res.status(404).json({
+      success: false,
+      error: 'API not found',
+    })
+  })
+}
+
+/**
  * error handler middleware
  */
 app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
   res.status(500).json({
     success: false,
     error: 'Server internal error',
-  })
-})
-
-/**
- * 404 handler
- */
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: 'API not found',
   })
 })
 

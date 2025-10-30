@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../lib/api';
-import { BroadcastLog } from '../types';
+import { BroadcastLog, PaginatedResponse } from '../types';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { toast } from 'sonner';
 import {
@@ -78,8 +78,8 @@ const Monitoring: React.FC = () => {
       });
 
       const response = await apiClient.get<PaginatedResponse<BroadcastLog>>(`/broadcast-logs?${params}`);
-      setLogs(response.data.data);
-      setPagination(response.data.pagination);
+      setLogs(response.data);
+      setPagination(response.pagination);
     } catch (error) {
       toast.error('Failed to load broadcast logs');
       console.error('Monitoring error:', error);

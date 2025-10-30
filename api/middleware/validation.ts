@@ -49,6 +49,17 @@ export const broadcastLogSchema = Joi.object({
   error_message: Joi.string().optional()
 });
 
+// Create broadcast log schema
+export const createBroadcastLogSchema = Joi.object({
+  tracking_number: Joi.string().min(1).required(),
+  consignee_name: Joi.string().min(1).required(),
+  consignee_phone: Joi.string().min(1).required(),
+  message: Joi.string().min(1).required(),
+  status: Joi.string().valid('pending', 'success', 'failed').default('pending'),
+  response_message: Joi.string().optional(),
+  broadcast_at: Joi.string().optional()
+});
+
 // Comment schema
 export const commentSchema = Joi.object({
   comment_text: Joi.string().min(1).required(),

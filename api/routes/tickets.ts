@@ -67,7 +67,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
 
     queryParams.push(limit, offset);
 
-    const result = await pool.query(query, queryParams);
+    const result = await db.query(query, queryParams);
 
     // Get total count
     const countQuery = `
@@ -76,7 +76,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
       ${whereClause}
     `;
     
-    const countResult = await pool.query(countQuery, queryParams.slice(0, -2));
+    const countResult = await db.query(countQuery, queryParams.slice(0, -2));
     const total = parseInt(countResult.rows[0].total);
 
     res.json({
@@ -110,7 +110,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res) => {
       WHERE t.id = $1
     `;
 
-    const result = await pool.query(query, [ticketId]);
+    const result = await db.query(query, [ticketId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Ticket not found' });
@@ -134,7 +134,7 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res) => {
       ORDER BY tc.created_at ASC
     `;
 
-    const commentsResult = await pool.query(commentsQuery, [ticketId]);
+    const commentsResult = await db.query(commentsQuery, [ticketId]);
 
     res.json({
       ticket,
@@ -158,7 +158,7 @@ router.post('/', authenticateToken, validateRequest(createTicketSchema), async (
       RETURNING *
     `;
 
-    const result = await pool.query(query, [tracking_number, customer_phone, subject, description, priority]);
+    const result = await db.query(query, [tracking_number, customer_phone, subject, description, priority]);
     const ticket = result.rows[0];
 
     // Broadcast ticket creation via WebSocket
@@ -185,7 +185,7 @@ router.put('/:id', authenticateToken, validateRequest(updateTicketSchema), async
     const updates = req.body;
 
     // Check if ticket exists
-    const checkResult = await pool.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
+    const checkResult = await db.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
     if (checkResult.rows.length === 0) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
@@ -222,7 +222,7 @@ router.put('/:id', authenticateToken, validateRequest(updateTicketSchema), async
       RETURNING *
     `;
 
-    const result = await pool.query(query, [ticketId, ...updateValues]);
+    const result = await db.query(query, [ticketId, ...updateValues]);
     const updatedTicket = result.rows[0];
 
     // Broadcast ticket update via WebSocket
@@ -249,7 +249,7 @@ router.post('/:id/comments', authenticateToken, validateRequest(commentSchema), 
     const { comment_text, is_internal_note } = req.body;
 
     // Check if ticket exists
-    const ticketResult = await pool.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
+    const ticketResult = await db.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
     if (ticketResult.rows.length === 0) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
@@ -267,7 +267,7 @@ router.post('/:id/comments', authenticateToken, validateRequest(commentSchema), 
       RETURNING *
     `;
 
-    const result = await pool.query(query, [ticketId, req.user?.id, comment_text, is_internal_note]);
+    const result = await db.query(query, [ticketId, req.user?.id, comment_text, is_internal_note]);
 
     res.status(201).json({
       message: 'Comment added successfully',
@@ -285,7 +285,7 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req: Aut
   try {
     const ticketId = req.params.id;
 
-    const result = await pool.query('DELETE FROM tickets WHERE id = $1 RETURNING *', [ticketId]);
+    const result = await db.query('DELETE FROM tickets WHERE id = $1 RETURNING *', [ticketId]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Ticket not found' });
