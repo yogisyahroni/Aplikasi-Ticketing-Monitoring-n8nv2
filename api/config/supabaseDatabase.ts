@@ -3,8 +3,8 @@ import { SupabaseClient } from '@supabase/supabase-js'
 
 // Supabase database wrapper to match existing database interface
 export class SupabaseDatabase {
-  private client: SupabaseClient<Database>
-  private adminClient: SupabaseClient<Database>
+  private client: SupabaseClient<Database> | null
+  private adminClient: SupabaseClient<Database> | null
 
   constructor() {
     this.client = createSupabaseClient()
@@ -13,6 +13,9 @@ export class SupabaseDatabase {
 
   // Test connection
   async testConnection(): Promise<boolean> {
+    if (!this.client) {
+      return false
+    }
     return await testSupabaseConnection()
   }
 

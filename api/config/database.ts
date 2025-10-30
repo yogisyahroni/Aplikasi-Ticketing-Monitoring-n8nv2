@@ -2,24 +2,45 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import { MockDatabase } from './mockDatabase.js';
 import { supabaseDb } from './supabaseDatabase.js';
+import { SQLiteDB } from './sqliteDatabase.js';
 
 dotenv.config();
 
-let pool: Pool | typeof MockDatabase | typeof supabaseDb;
+let pool: Pool | typeof MockDatabase | typeof supabaseDb | typeof SQLiteDB;
 let useMockDatabase = false;
 let useSupabase = false;
+let useSQLite = false;
 
 // Check database type from environment variables
-const databaseType = process.env.DATABASE_TYPE || 'postgresql'; // postgresql, supabase, sqlite, mock
-const forceMock = process.env.USE_SQLITE === 'true';
+const databaseType = process.env.DATABASE_TYPE || 'mock'; // postgresql, supabase, sqlite, mock
+const forceMock = process.env.USE_MOCK === 'true' || true; // Force mock for now due to SQLite issues
 
 // Initialize database connection
 async function initializeDatabase() {
-  if (forceMock) {
-    console.log('Using SQLite/Mock database (forced by environment)');
+  if (forceMock || databaseType === 'mock') {
+    console.log('Using Mock database (forced by environment)');
     pool = MockDatabase;
     useMockDatabase = true;
+    console.log('Mock database initialized successfully');
     return;
+  }
+
+  // Check database type preference
+  if (databaseType === 'sqlite') {
+    try {
+      await SQLiteDB.initialize();
+      pool = SQLiteDB;
+      useSQLite = true;
+      console.log('SQLite database initialized successfully');
+      return;
+    } catch (error) {
+      console.error('Failed to initialize SQLite database:', error);
+      console.log('Falling back to Mock database...');
+      pool = MockDatabase;
+      useMockDatabase = true;
+      console.log('Mock database initialized as fallback');
+      return;
+    }
   }
 
   // Check database type preference
@@ -64,8 +85,19 @@ async function initializeDatabase() {
   } catch (error) {
     console.error('Failed to connect to PostgreSQL:', error);
     console.log('Falling back to SQLite/Mock database');
-    pool = MockDatabase;
-    useMockDatabase = true;
+    
+    // Try SQLite as final fallback
+    try {
+      await SQLiteDB.initialize();
+      pool = SQLiteDB;
+      useSQLite = true;
+      console.log('SQLite database initialized as fallback');
+    } catch (sqliteError) {
+      console.error('Failed to initialize SQLite as fallback:', sqliteError);
+      pool = MockDatabase;
+      useMockDatabase = true;
+      console.log('Mock database initialized as final fallback');
+    }
   }
 }
 
@@ -77,6 +109,9 @@ export const db = {
   query: async (text: string, params?: any[]) => {
     if (useMockDatabase) {
       return MockDatabase.query(text, params);
+    }
+    if (useSQLite) {
+      return (pool as typeof SQLiteDB).query(text, params);
     }
     if (useSupabase) {
       // For Supabase, we need to handle SQL queries differently
@@ -90,6 +125,9 @@ export const db = {
     if (useMockDatabase) {
       return MockDatabase;
     }
+    if (useSQLite) {
+      return pool as typeof SQLiteDB;
+    }
     if (useSupabase) {
       return pool as typeof supabaseDb;
     }
@@ -98,11 +136,14 @@ export const db = {
   
   isUsingMockDatabase: () => useMockDatabase,
   isUsingSupabase: () => useSupabase,
+  isUsingSQLite: () => useSQLite,
   getDatabaseType: () => {
     if (useMockDatabase) return 'mock';
+    if (useSQLite) return 'sqlite';
     if (useSupabase) return 'supabase';
     return 'postgresql';
   }
 };
 
 export default db;
+

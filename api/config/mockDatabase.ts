@@ -121,6 +121,21 @@ export class MockDatabase {
       return { rows: user ? [user] : [] };
     }
     
+    // Mock COUNT query for users
+    if (text.includes('SELECT COUNT(*) as total') && text.includes('FROM users')) {
+      console.log('Mock DB: Returning users count:', mockUsers.length);
+      return { rows: [{ total: mockUsers.length }] };
+    }
+    
+    // Mock users query with pagination
+    if (text.includes('SELECT') && text.includes('FROM users') && text.includes('ORDER BY created_at DESC')) {
+      const limit = params?.[params.length - 2] || 10;
+      const offset = params?.[params.length - 1] || 0;
+      const paginatedUsers = mockUsers.slice(offset, offset + limit);
+      console.log('Mock DB: Returning paginated users:', paginatedUsers.length, 'of', mockUsers.length);
+      return { rows: paginatedUsers };
+    }
+    
     // Mock dashboard summary query
     if (text.includes('SELECT * FROM dashboard_summary')) {
       return { rows: mockDashboardSummary };
@@ -136,12 +151,13 @@ export class MockDatabase {
       return { rows: mockBroadcastLogs };
     }
     
-    // Mock users query
+    // Mock users query (general)
     if (text.includes('SELECT * FROM users')) {
       return { rows: mockUsers };
     }
     
     // Default empty response
+    console.log('Mock DB: No handler found for query, returning empty result');
     return { rows: [] };
   }
   

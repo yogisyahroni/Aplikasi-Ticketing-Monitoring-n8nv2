@@ -103,15 +103,14 @@ export interface Database {
 }
 
 // Get Supabase configuration from environment variables
-export const getSupabaseConfig = (): SupabaseConfig => {
+export const getSupabaseConfig = (): SupabaseConfig | null => {
   const url = process.env.SUPABASE_URL
   const anonKey = process.env.SUPABASE_ANON_KEY
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
   if (!url || !anonKey) {
-    throw new Error(
-      'Missing Supabase configuration. Please set SUPABASE_URL and SUPABASE_ANON_KEY environment variables.'
-    )
+    console.warn('Supabase configuration not found. Supabase features will be disabled.')
+    return null
   }
 
   return {
@@ -124,13 +123,17 @@ export const getSupabaseConfig = (): SupabaseConfig => {
 // Create Supabase client instance
 let supabaseClient: SupabaseClient<Database> | null = null
 
-export const createSupabaseClient = (): SupabaseClient<Database> => {
+export const createSupabaseClient = (): SupabaseClient<Database> | null => {
   if (supabaseClient) {
     return supabaseClient
   }
 
   try {
     const config = getSupabaseConfig()
+    
+    if (!config) {
+      return null
+    }
     
     supabaseClient = createClient<Database>(config.url, config.anonKey, {
       auth: {
@@ -157,15 +160,20 @@ export const createSupabaseClient = (): SupabaseClient<Database> => {
 }
 
 // Create admin Supabase client with service role key
-export const createSupabaseAdminClient = (): SupabaseClient<Database> => {
+export const createSupabaseAdminClient = (): SupabaseClient<Database> | null => {
   try {
     const config = getSupabaseConfig()
     
+    if (!config) {
+      return null
+    }
+    
     if (!config.serviceRoleKey) {
-      throw new Error('Service role key is required for admin operations')
+      console.warn('Service role key not found. Admin operations will be disabled.')
+      return null
     }
 
-    const adminClient = createClient<Database>(config.url, config.serviceRoleKey, {
+    return createClient<Database>(config.url, config.serviceRoleKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
@@ -175,11 +183,9 @@ export const createSupabaseAdminClient = (): SupabaseClient<Database> => {
       },
     })
 
-    console.log('✅ Supabase admin client initialized successfully')
-    return adminClient
   } catch (error) {
     console.error('❌ Failed to initialize Supabase admin client:', error)
-    throw error
+    return null
   }
 }
 
@@ -187,6 +193,10 @@ export const createSupabaseAdminClient = (): SupabaseClient<Database> => {
 export const testSupabaseConnection = async (): Promise<boolean> => {
   try {
     const client = createSupabaseClient()
+    
+    if (!client) {
+      return false
+    }
     
     // Test connection by querying a simple table or using a health check
     const { data, error } = await client
