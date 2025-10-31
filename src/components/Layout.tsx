@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
-import { useAuthStore } from '../store/authStore';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import {
   LayoutDashboard,
@@ -16,15 +16,19 @@ import {
 
 const Layout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user, logout } = useAuthStore();
+  const { user, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
     try {
-      await logout();
-      toast.success('Logged out successfully');
-      navigate('/login');
+      const { error } = await signOut();
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success('Logged out successfully');
+        navigate('/login');
+      }
     } catch (error) {
       toast.error('Logout failed');
     }
@@ -49,7 +53,7 @@ const Layout: React.FC = () => {
       icon: Radio,
       current: location.pathname === '/monitoring'
     },
-    ...(user?.role === 'admin' ? [{
+    ...(user?.user_metadata?.role === 'admin' ? [{
       name: 'User Management',
       href: '/users',
       icon: Users,
@@ -153,8 +157,8 @@ const Layout: React.FC = () => {
                     <User className="h-5 w-5 text-white" />
                   </div>
                   <div className="hidden lg:block">
-                    <p className="text-sm font-medium text-gray-900">{user?.full_name}</p>
-                    <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                    <p className="text-sm font-medium text-gray-900">{user?.user_metadata?.full_name || user?.email}</p>
+                    <p className="text-xs text-gray-500 capitalize">{user?.user_metadata?.role || 'user'}</p>
                   </div>
                   <button
                     onClick={handleLogout}

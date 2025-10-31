@@ -36,17 +36,11 @@ export class WebSocketServer {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
         
-        // Verify user exists in database
-        const userResult = await db.query(
-          'SELECT id, email, role, status FROM users WHERE id = $1 AND status = $2',
-          [decoded.userId, 'active']
-        );
-
-        if (userResult.rows.length === 0) {
+        // Authenticate user using adapter
+        const user = await db.getUserById(decoded.userId);
+        if (!user || !user.is_active) {
           return next(new Error('Authentication error: User not found or inactive'));
         }
-
-        const user = userResult.rows[0];
         socket.userId = user.id;
         socket.userRole = user.role;
         

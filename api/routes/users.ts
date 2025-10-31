@@ -16,47 +16,24 @@ router.get('/', authenticateToken, requireRole(['admin']), async (req: AuthReque
     const role = req.query.role as string;
     const search = req.query.search as string;
 
-    let whereClause = 'WHERE 1=1';
-    const queryParams: any[] = [];
-    let paramCount = 0;
+    // Use adapter method with filters
+    const filters = {
+      role,
+      search,
+      limit,
+      offset
+    };
 
-    if (role) {
-      paramCount++;
-      whereClause += ` AND role = $${paramCount}`;
-      queryParams.push(role);
-    }
+    const users = await db.getUsers(filters);
 
-    if (search) {
-      paramCount++;
-      whereClause += ` AND (full_name ILIKE $${paramCount} OR email ILIKE $${paramCount})`;
-      queryParams.push(`%${search}%`);
-    }
-
-    const query = `
-      SELECT 
-        id, full_name, email, role, is_active, created_at, updated_at
-      FROM users
-      ${whereClause}
-      ORDER BY created_at DESC
-      LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
-    `;
-
-    queryParams.push(limit, offset);
-
-    const result = await db.query(query, queryParams);
-
-    // Get total count
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM users
-      ${whereClause}
-    `;
-    
-    const countResult = await db.query(countQuery, queryParams.slice(0, -2));
-    const total = parseInt(countResult.rows[0].total);
+    // For pagination, we need to get total count separately
+    // This is a simplified approach - in production, you'd want the adapter to return both data and count
+    const totalFilters = { role, search };
+    const allUsers = await db.getUsers(totalFilters);
+    const total = allUsers.length;
 
     res.json({
-      users: result.rows,
+      users: users,
       pagination: {
         page,
         limit,
@@ -76,17 +53,14 @@ router.get('/:id', authenticateToken, requireRole(['admin']), async (req: AuthRe
   try {
     const userId = req.params.id;
 
-    const result = await db.query(
-      'SELECT id, full_name, email, role, is_active, created_at FROM users WHERE id = $1',
-      [userId]
-    );
+    const user = await db.getUserById(userId);
 
-    if (result.rows.length === 0) {
+    if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     res.json({
-      user: result.rows[0]
+      user: user
     });
 
   } catch (error) {
@@ -101,26 +75,21 @@ router.post('/', authenticateToken, requireRole(['admin']), validateRequest(crea
     const { full_name, email, password, role } = req.body;
 
     // Check if email already exists
-    const existingUser = await db.query('SELECT id FROM users WHERE email = $1', [email]);
-    if (existingUser.rows.length > 0) {
+    const existingUser = await db.getUserByEmail(email);
+    if (existingUser) {
       return res.status(400).json({ error: 'Email already exists' });
     }
 
     // Hash password
     const password_hash = await bcrypt.hash(password, 10);
 
-    // Insert new user
-    const query = `
-      INSERT INTO users (full_name, email, password_hash, role)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, full_name, email, role, is_active, created_at
-    `;
-    
-    const result = await db.query(query, [full_name, email, password_hash, role]);
+    // Create new user using adapter
+    const userData = { full_name, email, password_hash, role };
+    const newUser = await db.createUser(userData);
 
     res.status(201).json({
       message: 'User created successfully',
-      user: result.rows[0]
+      user: newUser
     });
 
   } catch (error) {
@@ -136,41 +105,29 @@ router.put('/:id', authenticateToken, requireRole(['admin']), validateRequest(up
     const updates = req.body;
 
     // Check if user exists
-    const checkResult = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
-    if (checkResult.rows.length === 0) {
+    const existingUser = await db.getUserById(userId);
+    if (!existingUser) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Check if email already exists (if email is being updated)
-    if (updates.email) {
-      const existingUser = await db.query('SELECT id FROM users WHERE email = $1 AND id != $2', [updates.email, userId]);
-      if (existingUser.rows.length > 0) {
+    if (updates.email && updates.email !== existingUser.email) {
+      const emailUser = await db.getUserByEmail(updates.email);
+      if (emailUser && emailUser.id !== userId) {
         return res.status(400).json({ error: 'Email already exists' });
       }
     }
 
-    // Build update query dynamically
-    const updateFields = Object.keys(updates);
-    const updateValues = Object.values(updates);
-    
-    if (updateFields.length === 0) {
+    if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    const setClause = updateFields.map((field, index) => `${field} = $${index + 2}`).join(', ');
-
-    const query = `
-      UPDATE users 
-      SET ${setClause}
-      WHERE id = $1
-      RETURNING id, full_name, email, role, is_active, created_at, updated_at
-    `;
-
-    const result = await db.query(query, [userId, ...updateValues]);
+    // Update user using adapter
+    const updatedUser = await db.updateUser(userId, updates);
 
     res.json({
       message: 'User updated successfully',
-      user: result.rows[0]
+      user: updatedUser
     });
 
   } catch (error) {
@@ -189,9 +146,9 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req: Aut
       return res.status(400).json({ error: 'Cannot delete your own account' });
     }
 
-    const result = await db.query('DELETE FROM users WHERE id = $1 RETURNING *', [userId]);
+    const deletedUser = await db.deleteUser(userId);
 
-    if (result.rows.length === 0) {
+    if (!deletedUser) {
       return res.status(404).json({ error: 'User not found' });
     }
 
@@ -206,13 +163,10 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req: Aut
 // Get agents list (for ticket assignment)
 router.get('/agents/list', authenticateToken, async (req: AuthRequest, res) => {
   try {
-    const result = await db.query(
-      'SELECT id, full_name, email FROM users WHERE role = $1 AND is_active = true ORDER BY full_name',
-      ['agent']
-    );
+    const agents = await db.getUsers({ role: 'agent', is_active: true });
 
     res.json({
-      agents: result.rows
+      agents: agents
     });
 
   } catch (error) {

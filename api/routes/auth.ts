@@ -12,17 +12,12 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user by email
-    const result = await db.query(
-      'SELECT id, email, password_hash, role, full_name, is_active FROM users WHERE email = $1',
-      [email]
-    );
+    // Find user by email using adapter
+    const user = await db.getUserByEmail(email);
 
-    if (result.rows.length === 0) {
+    if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-
-    const user = result.rows[0];
 
     if (!user.is_active) {
       return res.status(401).json({ error: 'Account is inactive' });
@@ -78,17 +73,12 @@ router.post('/refresh', async (req, res) => {
 
     const decoded = jwt.verify(refresh_token, process.env.JWT_REFRESH_SECRET!) as any;
 
-    // Verify user still exists and is active
-    const result = await db.query(
-      'SELECT id, email, role, full_name, is_active FROM users WHERE id = $1',
-      [decoded.userId]
-    );
+    // Verify user still exists and is active using adapter
+    const user = await db.getUserById(decoded.userId);
 
-    if (result.rows.length === 0 || !result.rows[0].is_active) {
+    if (!user || !user.is_active) {
       return res.status(401).json({ error: 'Invalid user' });
     }
-
-    const user = result.rows[0];
 
     // Generate new access token
     const accessToken = jwt.sign(

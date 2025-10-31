@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../store/authStore';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
 
@@ -8,7 +8,8 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const { login, isLoading } = useAuthStore();
+  const [isLoading, setIsLoading] = useState(false);
+  const { signIn } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -19,12 +20,19 @@ const Login: React.FC = () => {
       return;
     }
 
+    setIsLoading(true);
     try {
-      await login(email, password);
-      toast.success('Login successful!');
-      navigate('/dashboard');
+      const { error } = await signIn(email, password);
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success('Login successful!');
+        navigate('/dashboard');
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Login failed');
+    } finally {
+      setIsLoading(false);
     }
   };
 

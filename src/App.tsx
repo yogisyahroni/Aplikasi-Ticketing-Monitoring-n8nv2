@@ -1,8 +1,8 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { useAuthStore } from './store/authStore';
-import { WebSocketProvider } from './contexts/WebSocketContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { RealtimeProvider } from './contexts/RealtimeContext';
 
 // Components
 import Layout from './components/Layout';
@@ -15,23 +15,27 @@ import Tickets from './pages/Tickets';
 import Monitoring from './pages/Monitoring';
 import Users from './pages/Users';
 
-function App() {
-  const { initializeAuth, isAuthenticated } = useAuthStore();
+function AppContent() {
+  const { user, loading } = useAuth();
 
-  useEffect(() => {
-    initializeAuth();
-  }, [initializeAuth]);
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   return (
     <Router>
-      <WebSocketProvider>
+      <RealtimeProvider>
         <div className="App">
           <Routes>
             {/* Public Routes */}
             <Route 
               path="/login" 
               element={
-                isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />
+                user ? <Navigate to="/dashboard" replace /> : <Login />
               } 
             />
 
@@ -75,8 +79,16 @@ function App() {
             }}
           />
         </div>
-      </WebSocketProvider>
+      </RealtimeProvider>
     </Router>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

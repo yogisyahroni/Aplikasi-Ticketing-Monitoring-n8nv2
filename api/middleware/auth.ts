@@ -22,21 +22,18 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
     
-    // Verify user still exists and is active
-    const result = await db.query(
-      'SELECT id, email, role, full_name, is_active FROM users WHERE id = $1',
-      [decoded.userId]
-    );
+    // Verify user still exists and is active using adapter
+    const user = await db.getUserById(decoded.userId);
 
-    if (result.rows.length === 0 || !result.rows[0].is_active) {
+    if (!user || !user.is_active) {
       return res.status(401).json({ error: 'Invalid or inactive user' });
     }
 
     req.user = {
-      id: result.rows[0].id,
-      email: result.rows[0].email,
-      role: result.rows[0].role,
-      full_name: result.rows[0].full_name
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      full_name: user.full_name
     };
 
     next();

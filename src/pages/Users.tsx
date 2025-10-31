@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { apiClient } from '../lib/api';
-import { User, PaginatedResponse } from '../types';
-import { useAuthStore } from '../store/authStore';
+import { User } from '../types';
+import { useUsers } from '../hooks/useSupabase';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import {
   Plus,
@@ -17,18 +17,15 @@ import {
 } from 'lucide-react';
 
 const Users: React.FC = () => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { users, loading, createUser, updateUser, deleteUser } = useUsers();
+  const { user: currentUser, userProfile } = useAuth();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const { user: currentUser } = useAuthStore();
   
   const [pagination, setPagination] = useState({
     page: 1,
-    limit: 20,
-    total: 0,
-    pages: 0
+    limit: 20
   });
 
   // Filters
@@ -61,35 +58,33 @@ const Users: React.FC = () => {
 
   const [showPassword, setShowPassword] = useState(false);
 
-  useEffect(() => {
-    fetchUsers();
-  }, [pagination.page, pagination.limit]);
+  // Filter and paginate users
+  const filteredUsers = users.filter(user => {
+    const matchesSearch = !filters.search || 
+      user.full_name.toLowerCase().includes(filters.search.toLowerCase()) ||
+      user.email.toLowerCase().includes(filters.search.toLowerCase());
+    
+    const matchesRole = !filters.role || user.role === filters.role;
+    const matchesActive = filters.is_active === '' || 
+      (filters.is_active === 'true' ? user.is_active : !user.is_active);
+    
+    return matchesSearch && matchesRole && matchesActive;
+  });
 
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({
-        page: pagination.page.toString(),
-        limit: pagination.limit.toString(),
-        ...(filters.search && { search: filters.search }),
-        ...(filters.role && { role: filters.role }),
-        ...(filters.is_active && { is_active: filters.is_active })
-      });
-
-      const response = await apiClient.get<PaginatedResponse<User>>(`/users?${params}`);
-      setUsers(response.data);
-      setPagination(response.pagination);
-    } catch (error) {
-      toast.error('Failed to load users');
-      console.error('Users error:', error);
-    } finally {
-      setLoading(false);
-    }
+  const currentPagination = {
+    page: pagination.page,
+    limit: pagination.limit,
+    total: filteredUsers.length,
+    pages: Math.ceil(filteredUsers.length / pagination.limit)
   };
+
+  const paginatedUsers = filteredUsers.slice(
+    (pagination.page - 1) * pagination.limit,
+    pagination.page * pagination.limit
+  );
 
   const handleSearch = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
-    fetchUsers();
   };
 
   const handleReset = () => {
@@ -99,7 +94,7 @@ const Users: React.FC = () => {
       is_active: ''
     });
     setPagination(prev => ({ ...prev, page: 1 }));
-    setTimeout(fetchUsers, 100);
+  };
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -111,7 +106,7 @@ const Users: React.FC = () => {
     }
 
     try {
-      await apiClient.post('/users', createForm);
+      await createUser(createForm);
       toast.success('User created successfully');
       setShowCreateModal(false);
       setCreateForm({
@@ -120,7 +115,6 @@ const Users: React.FC = () => {
         password: '',
         role: 'agent'
       });
-      fetchUsers();
     } catch (error) {
       toast.error('Failed to create user');
       console.error('Create user error:', error);
@@ -147,11 +141,10 @@ const Users: React.FC = () => {
     }
 
     try {
-      await apiClient.put(`/users/${editingUser.id}`, editForm);
+      await updateUser(editingUser.id, editForm);
       toast.success('User updated successfully');
       setShowEditModal(false);
       setEditingUser(null);
-      fetchUsers();
     } catch (error) {
       toast.error('Failed to update user');
       console.error('Update user error:', error);
@@ -169,9 +162,8 @@ const Users: React.FC = () => {
     }
 
     try {
-      await apiClient.delete(`/users/${userId}`);
+      await deleteUser(userId);
       toast.success('User deleted successfully');
-      fetchUsers();
     } catch (error) {
       toast.error('Failed to delete user');
       console.error('Delete user error:', error);
@@ -327,7 +319,7 @@ const Users: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {users.map((user) => (
+                  {paginatedUsers.map((user) => (
                     <tr key={user.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center space-x-3">
@@ -388,19 +380,19 @@ const Users: React.FC = () => {
             </div>
 
             {/* Pagination */}
-            {pagination.pages > 1 && (
+            {currentPagination.pages > 1 && (
               <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
                 <div className="flex-1 flex justify-between sm:hidden">
                   <button
                     onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                    disabled={pagination.page === 1}
+                    disabled={currentPagination.page === 1}
                     className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                   >
                     Previous
                   </button>
                   <button
-                    onClick={() => setPagination(prev => ({ ...prev, page: Math.min(prev.pages, prev.page + 1) }))}
-                    disabled={pagination.page === pagination.pages}
+                    onClick={() => setPagination(prev => ({ ...prev, page: Math.min(currentPagination.pages, prev.page + 1) }))}
+                    disabled={currentPagination.page === currentPagination.pages}
                     className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                   >
                     Next
@@ -410,13 +402,13 @@ const Users: React.FC = () => {
                   <div>
                     <p className="text-sm text-gray-700">
                       Showing{' '}
-                      <span className="font-medium">{(pagination.page - 1) * pagination.limit + 1}</span>
+                      <span className="font-medium">{(currentPagination.page - 1) * currentPagination.limit + 1}</span>
                       {' '}to{' '}
                       <span className="font-medium">
-                        {Math.min(pagination.page * pagination.limit, pagination.total)}
+                        {Math.min(currentPagination.page * currentPagination.limit, currentPagination.total)}
                       </span>
                       {' '}of{' '}
-                      <span className="font-medium">{pagination.total}</span>
+                      <span className="font-medium">{currentPagination.total}</span>
                       {' '}results
                     </p>
                   </div>
@@ -424,19 +416,19 @@ const Users: React.FC = () => {
                     <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
                       <button
                         onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                        disabled={pagination.page === 1}
+                        disabled={currentPagination.page === 1}
                         className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
                       >
                         Previous
                       </button>
-                      {Array.from({ length: Math.min(5, pagination.pages) }, (_, i) => {
+                      {Array.from({ length: Math.min(5, currentPagination.pages) }, (_, i) => {
                         const page = i + 1;
                         return (
                           <button
                             key={page}
                             onClick={() => setPagination(prev => ({ ...prev, page }))}
                             className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                              pagination.page === page
+                              currentPagination.page === page
                                 ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
                                 : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
                             }`}
@@ -446,8 +438,8 @@ const Users: React.FC = () => {
                         );
                       })}
                       <button
-                        onClick={() => setPagination(prev => ({ ...prev, page: Math.min(prev.pages, prev.page + 1) }))}
-                        disabled={pagination.page === pagination.pages}
+                        onClick={() => setPagination(prev => ({ ...prev, page: Math.min(currentPagination.pages, prev.page + 1) }))}
+                        disabled={currentPagination.page === currentPagination.pages}
                         className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
                       >
                         Next

@@ -1,280 +1,237 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient, User, Session } from '@supabase/supabase-js';
+import { Database } from './database.types';
 
-// Database types
-export interface Database {
-  public: {
-    Tables: {
-      users: {
-        Row: {
-          id: string
-          email: string
-          name: string
-          role: string
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          email: string
-          name: string
-          role?: string
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          email?: string
-          name?: string
-          role?: string
-          updated_at?: string
-        }
-      }
-      tickets: {
-        Row: {
-          id: string
-          title: string
-          description: string
-          status: string
-          priority: string
-          assignee_id: string | null
-          created_by: string
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          title: string
-          description: string
-          status?: string
-          priority?: string
-          assignee_id?: string | null
-          created_by: string
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          title?: string
-          description?: string
-          status?: string
-          priority?: string
-          assignee_id?: string | null
-          updated_at?: string
-        }
-      }
-      broadcast_logs: {
-        Row: {
-          id: string
-          message: string
-          status: string
-          recipient_count: number
-          sent_at: string
-          created_by: string
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          message: string
-          status?: string
-          recipient_count?: number
-          sent_at?: string
-          created_by: string
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          message?: string
-          status?: string
-          recipient_count?: number
-          sent_at?: string
-          updated_at?: string
-        }
-      }
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase: SupabaseClient<Database> = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce'
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 10
     }
   }
-}
+});
 
-// Environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+// Authentication helpers
+export const authHelpers = {
+  // Sign in with email and password
+  async signIn(email: string, password: string) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+    return { data, error };
+  },
 
-// Create Supabase client
-export const supabase: SupabaseClient<Database> = createClient(supabaseUrl, supabaseAnonKey)
-
-// Helper functions for authentication
-export const auth = {
-  signUp: async (email: string, password: string, userData?: { name: string }) => {
+  // Sign up with email and password
+  async signUp(email: string, password: string, metadata?: any) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: userData
+        data: metadata
       }
-    })
-    return { data, error }
+    });
+    return { data, error };
   },
 
-  signIn: async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+  // Sign out
+  async signOut() {
+    const { error } = await supabase.auth.signOut();
+    return { error };
+  },
+
+  // Get current user
+  async getCurrentUser(): Promise<User | null> {
+    const { data: { user } } = await supabase.auth.getUser();
+    return user;
+  },
+
+  // Get current session
+  async getCurrentSession(): Promise<Session | null> {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session;
+  },
+
+  // Reset password
+  async resetPassword(email: string) {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`
+    });
+    return { data, error };
+  },
+
+  // Update password
+  async updatePassword(password: string) {
+    const { data, error } = await supabase.auth.updateUser({
       password
-    })
-    return { data, error }
+    });
+    return { data, error };
   },
 
-  signOut: async () => {
-    const { error } = await supabase.auth.signOut()
-    return { error }
-  },
-
-  getCurrentUser: async () => {
-    const { data: { user }, error } = await supabase.auth.getUser()
-    return { user, error }
-  },
-
-  onAuthStateChange: (callback: (event: string, session: any) => void) => {
-    return supabase.auth.onAuthStateChange(callback)
+  // Listen to auth state changes
+  onAuthStateChange(callback: (event: string, session: Session | null) => void) {
+    return supabase.auth.onAuthStateChange(callback);
   }
-}
-
-// Helper functions for database operations
-export const database = {
-  // Users
-  getUsers: async () => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .order('created_at', { ascending: false })
-    return { data, error }
-  },
-
-  getUserById: async (id: string) => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', id)
-      .single()
-    return { data, error }
-  },
-
-  createUser: async (userData: Database['public']['Tables']['users']['Insert']) => {
-    const { data, error } = await supabase
-      .from('users')
-      .insert(userData)
-      .select()
-      .single()
-    return { data, error }
-  },
-
-  updateUser: async (id: string, updates: Database['public']['Tables']['users']['Update']) => {
-    const { data, error } = await supabase
-      .from('users')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single()
-    return { data, error }
-  },
-
-  // Tickets
-  getTickets: async () => {
-    const { data, error } = await supabase
-      .from('tickets')
-      .select('*')
-      .order('created_at', { ascending: false })
-    return { data, error }
-  },
-
-  getTicketById: async (id: string) => {
-    const { data, error } = await supabase
-      .from('tickets')
-      .select('*')
-      .eq('id', id)
-      .single()
-    return { data, error }
-  },
-
-  createTicket: async (ticketData: Database['public']['Tables']['tickets']['Insert']) => {
-    const { data, error } = await supabase
-      .from('tickets')
-      .insert(ticketData)
-      .select()
-      .single()
-    return { data, error }
-  },
-
-  updateTicket: async (id: string, updates: Database['public']['Tables']['tickets']['Update']) => {
-    const { data, error } = await supabase
-      .from('tickets')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single()
-    return { data, error }
-  },
-
-  // Broadcast Logs
-  getBroadcastLogs: async () => {
-    const { data, error } = await supabase
-      .from('broadcast_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-    return { data, error }
-  },
-
-  createBroadcastLog: async (logData: Database['public']['Tables']['broadcast_logs']['Insert']) => {
-    const { data, error } = await supabase
-      .from('broadcast_logs')
-      .insert(logData)
-      .select()
-      .single()
-    return { data, error }
-  }
-}
+};
 
 // Real-time subscriptions
-export const realtime = {
-  subscribeToTickets: (callback: (payload: any) => void) => {
-    return supabase
-      .channel('tickets')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, callback)
-      .subscribe()
+export const realtimeHelpers = {
+  // Subscribe to table changes
+  subscribeToTableChanges(
+    table: keyof Database['public']['Tables'],
+    callback: (payload: any) => void,
+    statusCallback?: (status: string) => void,
+    filter?: string
+  ) {
+    const channel = supabase
+      .channel(`${table}_changes`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: table as string,
+          filter
+        },
+        callback
+      )
+      .subscribe((status) => {
+        if (statusCallback) statusCallback(status);
+      });
+
+    return channel;
   },
 
-  subscribeToBroadcastLogs: (callback: (payload: any) => void) => {
+  // Subscribe to specific events
+  subscribeToInserts(
+    table: keyof Database['public']['Tables'],
+    callback: (payload: any) => void,
+    statusCallback?: (status: string) => void,
+    filter?: string
+  ) {
     return supabase
-      .channel('broadcast_logs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'broadcast_logs' }, callback)
-      .subscribe()
+      .channel(`${table}_inserts`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: table as string,
+          filter
+        },
+        callback
+      )
+      .subscribe((status) => {
+        if (statusCallback) statusCallback(status);
+      });
   },
 
-  subscribeToUsers: (callback: (payload: any) => void) => {
+  subscribeToUpdates(
+    table: keyof Database['public']['Tables'],
+    callback: (payload: any) => void,
+    statusCallback?: (status: string) => void,
+    filter?: string
+  ) {
     return supabase
-      .channel('users')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, callback)
-      .subscribe()
+      .channel(`${table}_updates`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: table as string,
+          filter
+        },
+        callback
+      )
+      .subscribe((status) => {
+        if (statusCallback) statusCallback(status);
+      });
   },
 
-  unsubscribe: (channel: any) => {
-    return supabase.removeChannel(channel)
+  subscribeToDeletes(
+    table: keyof Database['public']['Tables'],
+    callback: (payload: any) => void,
+    statusCallback?: (status: string) => void,
+    filter?: string
+  ) {
+    return supabase
+      .channel(`${table}_deletes`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: table as string,
+          filter
+        },
+        callback
+      )
+      .subscribe((status) => {
+        if (statusCallback) statusCallback(status);
+      });
+  },
+
+  // Unsubscribe from channel
+  unsubscribe(channel: any) {
+    return supabase.removeChannel(channel);
   }
-}
+};
 
-// Connection test
-export const testConnection = async (): Promise<boolean> => {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('count')
-      .limit(1)
-    
-    return !error
-  } catch (error) {
-    console.error('Supabase connection test failed:', error)
-    return false
+// Storage helpers
+export const storageHelpers = {
+  // Upload file
+  async uploadFile(bucket: string, path: string, file: File, options?: any) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .upload(path, file, options);
+    return { data, error };
+  },
+
+  // Download file
+  async downloadFile(bucket: string, path: string) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .download(path);
+    return { data, error };
+  },
+
+  // Get public URL
+  getPublicUrl(bucket: string, path: string) {
+    const { data } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(path);
+    return data.publicUrl;
+  },
+
+  // Delete file
+  async deleteFile(bucket: string, paths: string[]) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .remove(paths);
+    return { data, error };
+  },
+
+  // List files
+  async listFiles(bucket: string, path?: string, options?: any) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .list(path, options);
+    return { data, error };
+  },
+
+  // Create signed URL
+  async createSignedUrl(bucket: string, path: string, expiresIn: number = 3600) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(path, expiresIn);
+    return { data, error };
   }
-}
-
-export default supabase
+};

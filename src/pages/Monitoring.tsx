@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { apiClient } from '../lib/api';
-import { BroadcastLog, PaginatedResponse } from '../types';
-import { useWebSocketContext } from '../contexts/WebSocketContext';
+import { BroadcastLog } from '../types';
+import { useBroadcastLogs } from '../hooks/useSupabase';
+import { useRealtime } from '../contexts/RealtimeContext';
 import { toast } from 'sonner';
 import {
   Search,
@@ -20,14 +20,11 @@ import {
 } from 'lucide-react';
 
 const Monitoring: React.FC = () => {
-  const { isConnected, lastUpdate } = useWebSocketContext();
-  const [logs, setLogs] = useState<BroadcastLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { broadcastLogs, loading } = useBroadcastLogs();
+  const { isConnected } = useRealtime();
   const [pagination, setPagination] = useState({
     page: 1,
-    limit: 20,
-    total: 0,
-    pages: 0
+    limit: 20
   });
 
   // Filters
@@ -40,57 +37,41 @@ const Monitoring: React.FC = () => {
     date_to: ''
   });
 
-  useEffect(() => {
-    fetchLogs();
-  }, [pagination.page, pagination.limit]);
+  // Filter and paginate broadcast logs
+  const filteredLogs = broadcastLogs.filter(log => {
+    const matchesSearch = !filters.search || 
+      log.tracking_number.toLowerCase().includes(filters.search.toLowerCase()) ||
+      log.phone.includes(filters.search) ||
+      log.message.toLowerCase().includes(filters.search.toLowerCase());
+    
+    const matchesStatus = !filters.status || log.status === filters.status;
+    const matchesTrackingNumber = !filters.tracking_number || 
+      log.tracking_number.toLowerCase().includes(filters.tracking_number.toLowerCase());
+    const matchesPhone = !filters.phone || log.phone.includes(filters.phone);
+    
+    const matchesDateFrom = !filters.date_from || 
+      new Date(log.created_at) >= new Date(filters.date_from);
+    const matchesDateTo = !filters.date_to || 
+      new Date(log.created_at) <= new Date(filters.date_to);
+    
+    return matchesSearch && matchesStatus && matchesTrackingNumber && 
+           matchesPhone && matchesDateFrom && matchesDateTo;
+  });
 
-  // Handle real-time updates
-  useEffect(() => {
-    if (lastUpdate) {
-      if (lastUpdate.type === 'broadcast_created') {
-        // Add new broadcast log to the list
-        const newLog = lastUpdate.data as BroadcastLog;
-        setLogs(prev => [newLog, ...prev]);
-        toast.success(`New broadcast: ${newLog.tracking_number}`);
-      } else if (lastUpdate.type === 'broadcast_updated') {
-        // Update existing broadcast log in the list
-        const updatedLog = lastUpdate.data as BroadcastLog;
-        setLogs(prev => prev.map(log => 
-          log.id === updatedLog.id ? updatedLog : log
-        ));
-        toast.info(`Broadcast ${updatedLog.tracking_number} updated: ${updatedLog.status}`);
-      }
-    }
-  }, [lastUpdate]);
-
-  const fetchLogs = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({
-        page: pagination.page.toString(),
-        limit: pagination.limit.toString(),
-        ...(filters.search && { search: filters.search }),
-        ...(filters.status && { status: filters.status }),
-        ...(filters.tracking_number && { tracking_number: filters.tracking_number }),
-        ...(filters.phone && { phone: filters.phone }),
-        ...(filters.date_from && { date_from: filters.date_from }),
-        ...(filters.date_to && { date_to: filters.date_to })
-      });
-
-      const response = await apiClient.get<PaginatedResponse<BroadcastLog>>(`/broadcast-logs?${params}`);
-      setLogs(response.data);
-      setPagination(response.pagination);
-    } catch (error) {
-      toast.error('Failed to load broadcast logs');
-      console.error('Monitoring error:', error);
-    } finally {
-      setLoading(false);
-    }
+  const currentPagination = {
+    page: pagination.page,
+    limit: pagination.limit,
+    total: filteredLogs.length,
+    pages: Math.ceil(filteredLogs.length / pagination.limit)
   };
+
+  const paginatedLogs = filteredLogs.slice(
+    (pagination.page - 1) * pagination.limit,
+    pagination.page * pagination.limit
+  );
 
   const handleSearch = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
-    fetchLogs();
   };
 
   const handleReset = () => {
@@ -103,7 +84,6 @@ const Monitoring: React.FC = () => {
       date_to: ''
     });
     setPagination(prev => ({ ...prev, page: 1 }));
-    setTimeout(fetchLogs, 100);
   };
 
   const getStatusIcon = (status: string) => {
@@ -260,7 +240,7 @@ const Monitoring: React.FC = () => {
             </button>
           </div>
           <div className="text-sm text-gray-600">
-            Showing {logs.length} of {pagination.total} results
+            Showing {paginatedLogs.length} of {currentPagination.total} results
           </div>
         </div>
       </div>
@@ -298,7 +278,7 @@ const Monitoring: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {logs.map((log) => (
+                  {paginatedLogs.map((log) => (
                     <tr key={log.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center space-x-2">
@@ -349,19 +329,19 @@ const Monitoring: React.FC = () => {
             </div>
 
             {/* Pagination */}
-            {pagination.pages > 1 && (
+            {currentPagination.pages > 1 && (
               <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
                 <div className="flex-1 flex justify-between sm:hidden">
                   <button
                     onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                    disabled={pagination.page === 1}
+                    disabled={currentPagination.page === 1}
                     className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                   >
                     Previous
                   </button>
                   <button
-                    onClick={() => setPagination(prev => ({ ...prev, page: Math.min(prev.pages, prev.page + 1) }))}
-                    disabled={pagination.page === pagination.pages}
+                    onClick={() => setPagination(prev => ({ ...prev, page: Math.min(currentPagination.pages, prev.page + 1) }))}
+                    disabled={currentPagination.page === currentPagination.pages}
                     className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                   >
                     Next
@@ -371,13 +351,13 @@ const Monitoring: React.FC = () => {
                   <div>
                     <p className="text-sm text-gray-700">
                       Showing{' '}
-                      <span className="font-medium">{(pagination.page - 1) * pagination.limit + 1}</span>
+                      <span className="font-medium">{(currentPagination.page - 1) * currentPagination.limit + 1}</span>
                       {' '}to{' '}
                       <span className="font-medium">
-                        {Math.min(pagination.page * pagination.limit, pagination.total)}
+                        {Math.min(currentPagination.page * currentPagination.limit, currentPagination.total)}
                       </span>
                       {' '}of{' '}
-                      <span className="font-medium">{pagination.total}</span>
+                      <span className="font-medium">{currentPagination.total}</span>
                       {' '}results
                     </p>
                   </div>
@@ -385,19 +365,19 @@ const Monitoring: React.FC = () => {
                     <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
                       <button
                         onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                        disabled={pagination.page === 1}
+                        disabled={currentPagination.page === 1}
                         className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
                       >
                         Previous
                       </button>
-                      {Array.from({ length: Math.min(5, pagination.pages) }, (_, i) => {
+                      {Array.from({ length: Math.min(5, currentPagination.pages) }, (_, i) => {
                         const page = i + 1;
                         return (
                           <button
                             key={page}
                             onClick={() => setPagination(prev => ({ ...prev, page }))}
                             className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                              pagination.page === page
+                              currentPagination.page === page
                                 ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
                                 : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
                             }`}
@@ -407,9 +387,9 @@ const Monitoring: React.FC = () => {
                         );
                       })}
                       <button
-                        onClick={() => setPagination(prev => ({ ...prev, page: Math.min(prev.pages, prev.page + 1) }))}
-                        disabled={pagination.page === pagination.pages}
-                        className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                        onClick={() => setPagination(prev => ({ ...prev, page: Math.min(currentPagination.pages, prev.page + 1) }))}
+                        disabled={currentPagination.page === currentPagination.pages}
+                        className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
                       >
                         Next
                       </button>

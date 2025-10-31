@@ -15,72 +15,35 @@ router.get('/', authenticateToken, async (req: AuthRequest, res) => {
     
     const status = req.query.status as string;
     const priority = req.query.priority as string;
-    const assigned_to = req.query.assigned_to as string;
+    const assigned_to_user_id = req.query.assigned_to_user_id as string;
     const search = req.query.search as string;
 
-    let whereClause = 'WHERE 1=1';
-    const queryParams: any[] = [];
-    let paramCount = 0;
-
-    if (status) {
-      paramCount++;
-      whereClause += ` AND t.status = $${paramCount}`;
-      queryParams.push(status);
-    }
-
-    if (priority) {
-      paramCount++;
-      whereClause += ` AND t.priority = $${paramCount}`;
-      queryParams.push(priority);
-    }
-
-    if (assigned_to) {
-      paramCount++;
-      whereClause += ` AND t.assigned_to_user_id = $${paramCount}`;
-      queryParams.push(assigned_to);
-    }
-
-    if (search) {
-      paramCount++;
-      whereClause += ` AND (t.subject ILIKE $${paramCount} OR t.description ILIKE $${paramCount} OR t.tracking_number ILIKE $${paramCount})`;
-      queryParams.push(`%${search}%`);
-    }
+    // Build filters object for adapter
+    const filters: any = {
+      status,
+      priority,
+      assigned_to_user_id,
+      search,
+      limit,
+      offset
+    };
 
     // For agents, only show tickets assigned to them
     if (req.user?.role === 'agent') {
-      paramCount++;
-      whereClause += ` AND t.assigned_to_user_id = $${paramCount}`;
-      queryParams.push(req.user.id);
+      filters.assigned_to_user_id = req.user.id;
     }
 
-    const query = `
-      SELECT 
-        t.*,
-        u.full_name as assigned_to_name,
-        (SELECT COUNT(*) FROM ticket_comments tc WHERE tc.ticket_id = t.id) as comment_count
-      FROM tickets t
-      LEFT JOIN users u ON t.assigned_to_user_id = u.id
-      ${whereClause}
-      ORDER BY t.created_at DESC
-      LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
-    `;
+    const tickets = await db.getTickets(filters);
 
-    queryParams.push(limit, offset);
-
-    const result = await db.query(query, queryParams);
-
-    // Get total count
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM tickets t
-      ${whereClause}
-    `;
-    
-    const countResult = await db.query(countQuery, queryParams.slice(0, -2));
-    const total = parseInt(countResult.rows[0].total);
+    // Get total count for pagination
+    const totalFilters = { ...filters };
+    delete totalFilters.limit;
+    delete totalFilters.offset;
+    const allTickets = await db.getTickets(totalFilters);
+    const total = allTickets.length;
 
     res.json({
-      tickets: result.rows,
+      tickets: tickets,
       pagination: {
         page,
         limit,
@@ -100,45 +63,41 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res) => {
   try {
     const ticketId = req.params.id;
 
-    const query = `
-      SELECT 
-        t.*,
-        u.full_name as assigned_to_name,
-        u.email as assigned_to_email
-      FROM tickets t
-      LEFT JOIN users u ON t.assigned_to_user_id = u.id
-      WHERE t.id = $1
-    `;
+    const ticket = await db.getTicketById(ticketId);
 
-    const result = await db.query(query, [ticketId]);
-
-    if (result.rows.length === 0) {
+    if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
-
-    const ticket = result.rows[0];
 
     // For agents, only allow access to their assigned tickets
     if (req.user?.role === 'agent' && ticket.assigned_to_user_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Get ticket comments
-    const commentsQuery = `
-      SELECT 
-        tc.*,
-        u.full_name as user_name
-      FROM ticket_comments tc
-      LEFT JOIN users u ON tc.user_id = u.id
-      WHERE tc.ticket_id = $1
-      ORDER BY tc.created_at ASC
-    `;
-
-    const commentsResult = await db.query(commentsQuery, [ticketId]);
+    // Get ticket comments - we'll need to implement this in adapter later
+    // For now, use direct query as fallback
+    let comments = [];
+    try {
+      if (db.getDatabaseType() !== 'supabase') {
+        const commentsResult = await db.query(`
+          SELECT 
+            tc.*,
+            u.full_name as user_name
+          FROM ticket_comments tc
+          LEFT JOIN users u ON tc.user_id = u.id
+          WHERE tc.ticket_id = $1
+          ORDER BY tc.created_at ASC
+        `, [ticketId]);
+        comments = commentsResult.rows || [];
+      }
+    } catch (error) {
+      console.warn('Could not fetch comments:', error);
+      comments = [];
+    }
 
     res.json({
       ticket,
-      comments: commentsResult.rows
+      comments
     });
 
   } catch (error) {
@@ -150,16 +109,17 @@ router.get('/:id', authenticateToken, async (req: AuthRequest, res) => {
 // Create new ticket
 router.post('/', authenticateToken, validateRequest(createTicketSchema), async (req: AuthRequest, res) => {
   try {
-    const { tracking_number, customer_phone, subject, description, priority } = req.body;
+    const { tracking_number, customer_phone, title, description, priority } = req.body;
 
-    const query = `
-      INSERT INTO tickets (tracking_number, customer_phone, subject, description, priority)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
-    `;
+    const ticketData = {
+      tracking_number,
+      customer_phone,
+      title,
+      description,
+      priority
+    };
 
-    const result = await db.query(query, [tracking_number, customer_phone, subject, description, priority]);
-    const ticket = result.rows[0];
+    const ticket = await db.createTicket(ticketData);
 
     // Broadcast ticket creation via WebSocket
     const socketServer = getWebSocketServer();
@@ -185,45 +145,28 @@ router.put('/:id', authenticateToken, validateRequest(updateTicketSchema), async
     const updates = req.body;
 
     // Check if ticket exists
-    const checkResult = await db.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
-    if (checkResult.rows.length === 0) {
+    const existingTicket = await db.getTicketById(ticketId);
+    if (!existingTicket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
 
-    const ticket = checkResult.rows[0];
-
     // For agents, only allow updating their assigned tickets
-    if (req.user?.role === 'agent' && ticket.assigned_to_user_id !== req.user.id) {
+    if (req.user?.role === 'agent' && existingTicket.assigned_to_user_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Build update query dynamically
-    const updateFields = Object.keys(updates);
-    const updateValues = Object.values(updates);
-    
-    if (updateFields.length === 0) {
+    if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    const setClause = updateFields.map((field, index) => `${field} = $${index + 2}`).join(', ');
-    
-    // Add closed_at timestamp if status is being changed to closed
-    let additionalSet = '';
-    if (updates.status === 'closed' && ticket.status !== 'closed') {
-      additionalSet = ', closed_at = CURRENT_TIMESTAMP';
-    } else if (updates.status && updates.status !== 'closed' && ticket.status === 'closed') {
-      additionalSet = ', closed_at = NULL';
+    // Handle closed_at timestamp logic
+    if (updates.status === 'closed' && existingTicket.status !== 'closed') {
+      updates.closed_at = new Date().toISOString();
+    } else if (updates.status && updates.status !== 'closed' && existingTicket.status === 'closed') {
+      updates.closed_at = null;
     }
 
-    const query = `
-      UPDATE tickets 
-      SET ${setClause}${additionalSet}
-      WHERE id = $1
-      RETURNING *
-    `;
-
-    const result = await db.query(query, [ticketId, ...updateValues]);
-    const updatedTicket = result.rows[0];
+    const updatedTicket = await db.updateTicket(ticketId, updates);
 
     // Broadcast ticket update via WebSocket
     const socketServer = getWebSocketServer();
@@ -249,29 +192,38 @@ router.post('/:id/comments', authenticateToken, validateRequest(commentSchema), 
     const { comment_text, is_internal_note } = req.body;
 
     // Check if ticket exists
-    const ticketResult = await db.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
-    if (ticketResult.rows.length === 0) {
+    const ticket = await db.getTicketById(ticketId);
+    if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
-
-    const ticket = ticketResult.rows[0];
 
     // For agents, only allow commenting on their assigned tickets
     if (req.user?.role === 'agent' && ticket.assigned_to_user_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const query = `
-      INSERT INTO ticket_comments (ticket_id, user_id, comment_text, is_internal_note)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `;
-
-    const result = await db.query(query, [ticketId, req.user?.id, comment_text, is_internal_note]);
+    // For now, use direct query for comments as we haven't implemented comment adapter methods yet
+    let comment = null;
+    try {
+      if (db.getDatabaseType() !== 'supabase') {
+        const result = await db.query(`
+          INSERT INTO ticket_comments (ticket_id, user_id, comment_text, is_internal_note)
+          VALUES ($1, $2, $3, $4)
+          RETURNING *
+        `, [ticketId, req.user?.id, comment_text, is_internal_note]);
+        comment = result.rows[0];
+      } else {
+        // For Supabase, we'd need to implement comment methods in adapter
+        throw new Error('Comment creation not yet implemented for Supabase');
+      }
+    } catch (error) {
+      console.error('Comment creation error:', error);
+      return res.status(500).json({ error: 'Could not create comment' });
+    }
 
     res.status(201).json({
       message: 'Comment added successfully',
-      comment: result.rows[0]
+      comment
     });
 
   } catch (error) {
@@ -285,9 +237,9 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req: Aut
   try {
     const ticketId = req.params.id;
 
-    const result = await db.query('DELETE FROM tickets WHERE id = $1 RETURNING *', [ticketId]);
+    const deletedTicket = await db.deleteTicket(ticketId);
 
-    if (result.rows.length === 0) {
+    if (!deletedTicket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
 

@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { apiClient } from '../lib/api';
+import { useTickets } from '../hooks/useSupabase';
+import { useAuth } from '../contexts/AuthContext';
+import { useRealtime } from '../contexts/RealtimeContext';
 import { Ticket, PaginatedResponse, User } from '../types';
-import { useAuthStore } from '../store/authStore';
-import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { toast } from 'sonner';
 import {
   Plus,
@@ -23,12 +23,12 @@ import {
 } from 'lucide-react';
 
 const Tickets: React.FC = () => {
-  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const { tickets, createTicket, updateTicket, deleteTicket } = useTickets();
+  const { userProfile } = useAuth();
+  const { isConnected } = useRealtime();
   const [agents, setAgents] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const { user } = useAuthStore();
-  const { isConnected, lastUpdate } = useWebSocketContext();
   
   const [pagination, setPagination] = useState({
     page: 1,
@@ -42,7 +42,7 @@ const Tickets: React.FC = () => {
     search: '',
     status: '',
     priority: '',
-    assigned_to: ''
+    assigned_to_user_id: ''
   });
 
   // Create ticket form
@@ -54,65 +54,54 @@ const Tickets: React.FC = () => {
     priority: 'medium' as const
   });
 
+  // Load agents on component mount
   useEffect(() => {
-    fetchTickets();
     fetchAgents();
-  }, [pagination.page, pagination.limit]);
+  }, []);
 
-  // Handle real-time updates
-  useEffect(() => {
-    if (lastUpdate) {
-      if (lastUpdate.type === 'ticket_created') {
-        // Add new ticket to the list if it matches current filters
-        const newTicket = lastUpdate.data as Ticket;
-        setTickets(prev => [newTicket, ...prev]);
-        toast.success(`New ticket created: ${newTicket.ticket_uid}`);
-      } else if (lastUpdate.type === 'ticket_updated') {
-        // Update existing ticket in the list
-        const updatedTicket = lastUpdate.data as Ticket;
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === updatedTicket.id ? updatedTicket : ticket
-        ));
-        toast.info(`Ticket ${updatedTicket.ticket_uid} updated`);
-      }
+  // Filter tickets based on current filters
+  const filteredTickets = tickets.filter(ticket => {
+    if (filters.search && !ticket.subject.toLowerCase().includes(filters.search.toLowerCase()) && 
+        !ticket.tracking_number?.toLowerCase().includes(filters.search.toLowerCase())) {
+      return false;
     }
-  }, [lastUpdate]);
-
-  const fetchTickets = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({
-        page: pagination.page.toString(),
-        limit: pagination.limit.toString(),
-        ...(filters.search && { search: filters.search }),
-        ...(filters.status && { status: filters.status }),
-        ...(filters.priority && { priority: filters.priority }),
-        ...(filters.assigned_to && { assigned_to: filters.assigned_to })
-      });
-
-      const response = await apiClient.get<PaginatedResponse<Ticket>>(`/tickets?${params}`);
-      setTickets(response.data);
-      setPagination(response.pagination);
-    } catch (error) {
-      toast.error('Failed to load tickets');
-      console.error('Tickets error:', error);
-    } finally {
-      setLoading(false);
+    if (filters.status && ticket.status !== filters.status) {
+      return false;
     }
+    if (filters.priority && ticket.priority !== filters.priority) {
+      return false;
+    }
+    if (filters.assigned_to_user_id && ticket.assigned_to_user_id !== filters.assigned_to_user_id) {
+      return false;
+    }
+    return true;
+  });
+
+  // Pagination for filtered tickets
+  const paginatedTickets = filteredTickets.slice(
+    (pagination.page - 1) * pagination.limit,
+    pagination.page * pagination.limit
+  );
+
+  // Update pagination info
+  const totalPages = Math.ceil(filteredTickets.length / pagination.limit);
+  const currentPagination = {
+    ...pagination,
+    total: filteredTickets.length,
+    pages: totalPages
   };
 
   const fetchAgents = async () => {
-    try {
-      const response = await apiClient.get<User[]>('/users/agents');
-      setAgents(response);
-    } catch (error) {
-      console.error('Failed to load agents:', error);
-    }
+    // Mock agents data for now
+    setAgents([
+      { id: '1', name: 'Agent Smith', email: 'agent1@example.com', role: 'agent' },
+      { id: '2', name: 'Agent Johnson', email: 'agent2@example.com', role: 'agent' },
+      { id: '3', name: 'Agent Brown', email: 'agent3@example.com', role: 'agent' },
+    ] as User[]);
   };
 
   const handleSearch = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
-    fetchTickets();
   };
 
   const handleReset = () => {
@@ -120,10 +109,9 @@ const Tickets: React.FC = () => {
       search: '',
       status: '',
       priority: '',
-      assigned_to: ''
+      assigned_to_user_id: ''
     });
     setPagination(prev => ({ ...prev, page: 1 }));
-    setTimeout(fetchTickets, 100);
   };
 
   const handleCreateTicket = async (e: React.FormEvent) => {
@@ -135,7 +123,14 @@ const Tickets: React.FC = () => {
     }
 
     try {
-      await apiClient.post('/tickets', createForm);
+      await createTicket({
+        tracking_number: createForm.tracking_number || `TK-${Date.now()}`,
+        customer_phone: createForm.customer_phone,
+        subject: createForm.subject,
+        description: createForm.description,
+        priority: createForm.priority,
+        status: 'open',
+      });
       toast.success('Ticket created successfully');
       setShowCreateModal(false);
       setCreateForm({
@@ -145,22 +140,20 @@ const Tickets: React.FC = () => {
         description: '',
         priority: 'medium'
       });
-      fetchTickets();
     } catch (error) {
       toast.error('Failed to create ticket');
       console.error('Create ticket error:', error);
     }
   };
 
-  const handleDeleteTicket = async (ticketId: number) => {
+  const handleDeleteTicket = async (ticketId: string) => {
     if (!confirm('Are you sure you want to delete this ticket?')) {
       return;
     }
 
     try {
-      await apiClient.delete(`/tickets/${ticketId}`);
+      await deleteTicket(ticketId);
       toast.success('Ticket deleted successfully');
-      fetchTickets();
     } catch (error) {
       toast.error('Failed to delete ticket');
       console.error('Delete ticket error:', error);
@@ -295,8 +288,8 @@ const Tickets: React.FC = () => {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Assigned To</label>
             <select
-              value={filters.assigned_to}
-              onChange={(e) => setFilters(prev => ({ ...prev, assigned_to: e.target.value }))}
+              value={filters.assigned_to_user_id}
+              onChange={(e) => setFilters(prev => ({ ...prev, assigned_to_user_id: e.target.value }))}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">All Agents</option>
@@ -367,7 +360,7 @@ const Tickets: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {tickets.map((ticket) => (
+                  {paginatedTickets.map((ticket) => (
                     <tr key={ticket.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div>
@@ -451,19 +444,19 @@ const Tickets: React.FC = () => {
             </div>
 
             {/* Pagination */}
-            {pagination.pages > 1 && (
+            {currentPagination.pages > 1 && (
               <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
                 <div className="flex-1 flex justify-between sm:hidden">
                   <button
                     onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                    disabled={pagination.page === 1}
+                    disabled={currentPagination.page === 1}
                     className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                   >
                     Previous
                   </button>
                   <button
-                    onClick={() => setPagination(prev => ({ ...prev, page: Math.min(prev.pages, prev.page + 1) }))}
-                    disabled={pagination.page === pagination.pages}
+                    onClick={() => setPagination(prev => ({ ...prev, page: Math.min(currentPagination.pages, prev.page + 1) }))}
+                    disabled={currentPagination.page === currentPagination.pages}
                     className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                   >
                     Next
@@ -473,13 +466,13 @@ const Tickets: React.FC = () => {
                   <div>
                     <p className="text-sm text-gray-700">
                       Showing{' '}
-                      <span className="font-medium">{(pagination.page - 1) * pagination.limit + 1}</span>
+                      <span className="font-medium">{(currentPagination.page - 1) * currentPagination.limit + 1}</span>
                       {' '}to{' '}
                       <span className="font-medium">
-                        {Math.min(pagination.page * pagination.limit, pagination.total)}
+                        {Math.min(currentPagination.page * currentPagination.limit, currentPagination.total)}
                       </span>
                       {' '}of{' '}
-                      <span className="font-medium">{pagination.total}</span>
+                      <span className="font-medium">{currentPagination.total}</span>
                       {' '}results
                     </p>
                   </div>
@@ -487,19 +480,19 @@ const Tickets: React.FC = () => {
                     <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
                       <button
                         onClick={() => setPagination(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
-                        disabled={pagination.page === 1}
+                        disabled={currentPagination.page === 1}
                         className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
                       >
                         Previous
                       </button>
-                      {Array.from({ length: Math.min(5, pagination.pages) }, (_, i) => {
+                      {Array.from({ length: Math.min(5, currentPagination.pages) }, (_, i) => {
                         const page = i + 1;
                         return (
                           <button
                             key={page}
                             onClick={() => setPagination(prev => ({ ...prev, page }))}
                             className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                              pagination.page === page
+                              currentPagination.page === page
                                 ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
                                 : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
                             }`}
@@ -509,8 +502,8 @@ const Tickets: React.FC = () => {
                         );
                       })}
                       <button
-                        onClick={() => setPagination(prev => ({ ...prev, page: Math.min(prev.pages, prev.page + 1) }))}
-                        disabled={pagination.page === pagination.pages}
+                        onClick={() => setPagination(prev => ({ ...prev, page: Math.min(currentPagination.pages, prev.page + 1) }))}
+                        disabled={currentPagination.page === currentPagination.pages}
                         className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
                       >
                         Next

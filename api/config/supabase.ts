@@ -47,7 +47,7 @@ export interface Database {
           description: string
           status: 'open' | 'in_progress' | 'resolved' | 'closed'
           priority: 'low' | 'medium' | 'high' | 'urgent'
-          assigned_to: string | null
+          assigned_to_user_id: string | null
           created_by: string
           created_at: string
           updated_at: string
@@ -58,7 +58,7 @@ export interface Database {
           description: string
           status?: 'open' | 'in_progress' | 'resolved' | 'closed'
           priority?: 'low' | 'medium' | 'high' | 'urgent'
-          assigned_to?: string | null
+          assigned_to_user_id?: string | null
           created_by: string
           created_at?: string
           updated_at?: string
@@ -69,7 +69,7 @@ export interface Database {
           description?: string
           status?: 'open' | 'in_progress' | 'resolved' | 'closed'
           priority?: 'low' | 'medium' | 'high' | 'urgent'
-          assigned_to?: string | null
+          assigned_to_user_id?: string | null
           updated_at?: string
         }
       }

@@ -122,7 +122,7 @@ export class SupabaseDatabase {
     const { data, error } = await this.client
       .from('tickets')
       .select('*')
-      .eq('assigned_to', userId)
+      .eq('assigned_to_user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
